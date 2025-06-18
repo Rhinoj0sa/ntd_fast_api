@@ -2,6 +2,10 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from  models import ItemPayload
 app = FastAPI()
+from get_text_from_pdf import get_text_from_pdf
+import os
+import shutil
+import PyPDF2
 
 grocery_list: dict[int, ItemPayload] = {}
 
@@ -33,10 +37,24 @@ def add_item(item_name: str, quantity: int):
     return {"item": grocery_list[item_id]}
 
 
+
+
+
+
+UPLOAD_DIR = "uploaded_pdfs"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 @app.post("/upload-pdf/")
-async def upload_pdf(file: UploadFile = File(...)) -> JSONResponse:
+async def upload_pdf(file: UploadFile = File(...)):
     if file.content_type != "application/pdf":
         return JSONResponse(status_code=400, content={"error": "File must be a PDF"})
-    contents = await file.read()
-    # You can process the PDF here
-    return JSONResponse(content={"filename": file.filename, "size": len(contents)})
+    file_location = os.path.join(UPLOAD_DIR, file.filename)
+    with open(file_location, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    # Extract text from the saved PDF
+    text = ""
+    with open(file_location, "rb") as pdf_file:
+        reader = PyPDF2.PdfReader(pdf_file)
+        for page in reader.pages:
+            text += page.extract_text() or ""
+    return {"filename": file.filename, "text": text}
