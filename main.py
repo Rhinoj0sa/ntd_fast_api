@@ -8,6 +8,7 @@ import os
 import shutil
 import PyPDF2
 import redis
+import json
 
 
 app = FastAPI()
@@ -123,8 +124,12 @@ def remove_quantity(item_id: int, quantity: int) -> dict[str, str]:
 
 
 
+
 UPLOAD_DIR = "uploaded_pdfs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Initialize Redis client
+redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
 
 @app.post("/upload-pdf/")
 async def upload_pdf(file: UploadFile = File(...)):
@@ -139,4 +144,28 @@ async def upload_pdf(file: UploadFile = File(...)):
         reader = PyPDF2.PdfReader(pdf_file)
         for page in reader.pages:
             text += page.extract_text() or ""
-    return {"filename": file.filename, "text": text}
+    result = {"filename": file.filename, "text": text}
+    # Save the return object in Redis as JSON
+    redis_client.set(f"pdf_result:{file.filename}", json.dumps(result))
+    return result
+
+
+@app.get("/pdfs/")
+def get_all_pdfs():
+    # Find all keys that match the pattern for stored PDFs
+    keys = redis_client.keys("pdf_result:*")
+    pdfs = []
+    for key in keys:
+        value = redis_client.get(key)
+        if value:
+            pdfs.append(json.loads(value))
+    return {"pdfs": pdfs}
+
+
+@app.get("/pdfs/{filename}")
+def get_pdf(filename: str):
+    key = f"pdf_result:{filename}"
+    value = redis_client.get(key)
+    if value is None:
+        raise HTTPException(status_code=404, detail="PDF not found")
+    return json.loads(value)
