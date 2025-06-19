@@ -10,6 +10,8 @@ import PyPDF2
 import redis
 import json
 
+from sentence_transformer import identify_document_type
+
 
 app = FastAPI()
 
@@ -135,7 +137,7 @@ redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
 async def upload_pdf(file: UploadFile = File(...)):
     if file.content_type != "application/pdf":
         return JSONResponse(status_code=400, content={"error": "File must be a PDF"})
-    file_location = os.path.join(UPLOAD_DIR, file.filename)
+    file_location: str = os.path.join(UPLOAD_DIR, file.filename)
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     # Extract text from the saved PDF
@@ -144,14 +146,17 @@ async def upload_pdf(file: UploadFile = File(...)):
         reader = PyPDF2.PdfReader(pdf_file)
         for page in reader.pages:
             text += page.extract_text() or ""
-    result = {"filename": file.filename, "text": text}
+    id_result: tuple[str, str] = identify_document_type(text)
+    result: dict[str, Any] = {"filename": file.filename, "text": text, "document_type": id_result[0], "confidence_score": id_result[1]}
+    
     # Save the return object in Redis as JSON
     redis_client.set(f"pdf_result:{file.filename}", json.dumps(result))
+    
     return result
 
 
 @app.get("/pdfs/")
-def get_all_pdfs():
+def get_all_pdfs() -> dict[str, list[dict[str, Any]]]:
     # Find all keys that match the pattern for stored PDFs
     keys = redis_client.keys("pdf_result:*")
     pdfs = []
